@@ -71,6 +71,19 @@ static void schedule (void);
 void schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
+
+
+
+//comparator
+
+static bool compar(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED){
+  struct thread *t1, *t2;
+  ASSERT(a!=NULL && b!=NULL);
+  t1 = list_entry(a, struct thread, elem);
+  t2 = list_entry(b, struct thread, elem);
+  return (t1->priority > t2->priority);
+}
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -316,7 +329,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+    list_insert_ordered (&ready_list, &cur->elem, (list_less_func*)&compar, NULL);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
