@@ -72,6 +72,13 @@ void schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
 
+//timer_sleep functions
+
+void thread_block_till(int64_t);
+enum intr_level thread_priority_temporarily_up(void);
+void thread_set_next_wakeup(void);
+void thread_priority_restore(enum intr_level);
+int64_t timer_ticks(void);
 
 
 //comparator
@@ -258,7 +265,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  list_insert_ordered (&ready_list, &t->elem, (list_less_func*)&compar, NULL);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -598,3 +605,22 @@ allocate_tid (void)
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
+
+enum intr_level thread_priority_temporarily_up()
+{
+	struct thread *t = running_thread();//cur thread
+	t->prev_priority = t->priority;
+	t->priority = PRI_MAX;
+	enum intr_level old_level = intr_disable();
+	return old_level;
+}
+
+void thread_block_till(int64_t wakeup_at)
+{
+  struct thread *t = running_thread();
+  t->waitTime = wakeup_at;
+
+  list_insert_ordered(&sleepers, &t->elem, (list_less_func*)&before, NULL);
+  thread_block();
+}
