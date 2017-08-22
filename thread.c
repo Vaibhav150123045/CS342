@@ -624,3 +624,39 @@ void thread_block_till(int64_t wakeup_at)
   list_insert_ordered(&sleepers, &t->elem, (list_less_func*)&before, NULL);
   thread_block();
 }
+
+void thread_set_next_wakeup(void)
+{
+  struct list_elem *e;
+  struct list_elem *e_next;
+  struct thread *t;
+  enum intr_level old_level;
+
+  if(list_empty(&sleepers)) 
+		return;
+
+  e = list_begin (&sleepers);
+   while(e != list_end (&sleepers))
+   {
+      e_next = list_next(e);
+      t = list_entry (e, struct thread, elem);
+      if(t->waitTime <= timer_ticks())
+	{
+        	old_level = intr_disable();
+        	list_remove(e);
+        	thread_unblock(t);
+        	intr_set_level(old_level);
+      	}
+       else break;
+      	   	e = e_next;
+  	}	
+}
+                           
+void thread_priority_restore(enum intr_level old_level)
+{
+  struct thread *t = thread_current ();
+  t->priority = t->prev_priority;
+  intr_set_level(old_level);
+}
+
+
