@@ -91,7 +91,7 @@ struct thread
 	int prev_priority;
     struct list_elem allelem;           /* List element for all threads list. */
 	struct list_elem waitElem;
-	int64_t waitTime;
+	int64_t wakeup_at;
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
@@ -108,6 +108,10 @@ struct thread
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
+
+static bool before(const struct list_elem *a, const struct list_elem *b, void * aux UNUSED);
+static bool compar(const struct list_elem *a, const struct list_elem *b, void * aux UNUSED);
+
 
 void thread_init (void);
 void thread_start (void);
@@ -140,10 +144,9 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
-enum intr_level thread_priority_temporarily_up(void);
-void thread_block_till(int64_t);
+void thread_priority_temporarily_up(struct thread * t);
+void thread_block_till(int64_t wakeup_at);
 void thread_set_next_wakeup(void);
-void thread_priority_restore(enum intr_level);
-
+void thread_priority_restore(struct thread * t);
 
 #endif /* threads/thread.h */
