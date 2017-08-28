@@ -79,6 +79,7 @@ void thread_priority_temporarily_up(struct thread * t);
 void thread_set_next_wakeup(void);
 void thread_priority_restore(struct thread * t);
 
+void test_yield(void); /* Test the current thread whether should out of CPU or not*/
 
 //comparator
 
@@ -372,23 +373,36 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
- struct thread * t = thread_current();
-  t->priority = new_priority;
-
-        struct list_elem *cur_elem;
-        if(list_empty(&ready_list))return;
-
-  cur_elem=list_begin(&ready_list);
-         t=list_entry(cur_elem,struct thread, elem);
-        if(t->priority > new_priority)
-                thread_yield();
-
+  enum intr_level old_level;
+  int old_priority;
+  old_level = intr_disable();
+  
+  /* get current thread priority */
+  old_priority = thread_current() -> priority;
+  
+  /* give the current thread priority to init_priority used to update_priority() */
+  thread_current() -> prev_priority = new_priority;
+ 
+    
+    
+  /*
+   * If the current thread priority is lower than the previous thread priority,
+   * it need to test whether the current thread need to out the CPU or not.
+   */
+  if (old_priority > thread_current() -> priority)
+    test_yield();
+  
+  
+	intr_set_level(old_level);
 }
 
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) 
 {
+	enum intr_level old_level;
+  old_level = intr_disable();
+  intr_set_level(old_level);
   return thread_current ()->priority;
 }
 
@@ -688,5 +702,16 @@ void thread_priority_restore(struct thread * t)
   t->priority = t->prev_priority;
 
 }
+void test_yield(void)
+{
+  struct thread *t;
+  
+  if (list_empty(&ready_list))
+    return;
+  
+  t = list_entry(list_front(&ready_list), struct thread, elem);
 
+  if ((thread_current() -> priority) < t -> priority)
+    thread_yield();
+}
 
