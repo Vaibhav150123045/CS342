@@ -144,9 +144,12 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
+
 void thread_priority_temporarily_up(struct thread * t);
 void thread_block_till(int64_t wakeup_at);
 void thread_set_next_wakeup(void);
 void thread_priority_restore(struct thread * t);
+
+void test_yield(void); /* Test the current thread whether should out of CPU or not*/
 
 #endif /* threads/thread.h */
