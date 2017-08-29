@@ -82,18 +82,26 @@ typedef int tid_t;
    blocked state is on a semaphore wait list. */
 struct thread
   {
+	 
     /* Owned by thread.c. */
     tid_t tid;                          /* Thread identifier. */
     enum thread_status status;          /* Thread state. */
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
-	int prev_priority;
+    int prev_priority;
+   
+    struct list donor_list;              /* A list of priority donors */
+struct lock *wants_lock; /* the lock the thread is trying to get */
     struct list_elem allelem;           /* List element for all threads list. */
-	struct list_elem waitElem;
-	int64_t wakeup_at;
+    struct list_elem waitElem;
+    int64_t wakeup_at;                   /*for wait time*/
+
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
+
+    struct list_elem donor_list_elem; /* list element for donor lists */
+    //struct list_elem donation_list_elem;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -109,9 +117,10 @@ struct thread
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
 
-static bool before(const struct list_elem *a, const struct list_elem *b, void * aux UNUSED);
-static bool compar(const struct list_elem *a, const struct list_elem *b, void * aux UNUSED);
+//static bool before(const struct list_elem *a, const struct list_elem *b, void * aux UNUSED);
+static bool compar(const struct list_elem *a, const struct list_elem *b, void * aux);
 
+static bool before(const struct list_elem *a, const struct list_elem *b, void * aux);
 
 void thread_init (void);
 void thread_start (void);
@@ -144,12 +153,22 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
+void test_yield(void); /* Test the current thread whether should out of CPU or not*/
+
+void update_priority (void); /* Update the thread priority */
+
+void donate_priority(void); /* Donate the priority (priority inheritance) */
+
+
+void lock_remove (struct lock *lock); /* Remove lock from donation_list */
 
 void thread_priority_temporarily_up(struct thread * t);
 void thread_block_till(int64_t wakeup_at);
 void thread_set_next_wakeup(void);
 void thread_priority_restore(struct thread * t);
 
-void test_yield(void); /* Test the current thread whether should out of CPU or not*/
+
+
+
 
 #endif /* threads/thread.h */

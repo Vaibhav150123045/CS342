@@ -59,6 +59,9 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
    Controlled by kernel command-line option "-o mlfqs". */
 bool thread_mlfqs;
 
+
+#define DEPTH_LIMIT 8
+
 static void kernel_thread (thread_func *, void *aux);
 
 static void idle (void *aux UNUSED);
@@ -71,20 +74,35 @@ static void schedule (void);
 void schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
-
 //timer_sleep functions
+static bool before(const struct list_elem *a, const struct list_elem *b, void * aux UNUSED);
+
+static bool compar(const struct list_elem *a, const struct list_elem *b, void * aux UNUSED);
+
+
+
 
 void thread_block_till(int64_t wakeup_at);
 void thread_priority_temporarily_up(struct thread * t);
 void thread_set_next_wakeup(void);
 void thread_priority_restore(struct thread * t);
+int64_t timer_ticks(void);
 
+void thread_add_lock (struct lock *lock);
 void test_yield(void); /* Test the current thread whether should out of CPU or not*/
+
+void update_priority (void); /* Update the thread priority */
+
+void donate_priority(void); /* Donate the priority (priority inheritance) */
+
+void lock_remove (struct lock *lock); /* Remove lock from donation_list */
+
+
 
 //comparator
 
 static bool compar(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED){
-  struct thread *t1, *t2;
+  const struct thread *t1, *t2;
   ASSERT(a!=NULL && b!=NULL);
   t1 = list_entry(a, struct thread, elem);
   t2 = list_entry(b, struct thread, elem);
@@ -92,7 +110,7 @@ static bool compar(const struct list_elem *a, const struct list_elem *b, void *a
 }
 
 static bool before(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED){
-  struct thread *t1, *t2;
+  const struct thread *t1, *t2;
   ASSERT(a!=NULL && b!=NULL);
   t1 = list_entry(a, struct thread, elem);
   t2 = list_entry(b, struct thread, elem);
@@ -105,8 +123,11 @@ static bool before(const struct list_elem *a, const struct list_elem *b, void *a
    was careful to put the bottom of the stack at a page boundary.
 
    Also initializes the run queue and the tid lock.
-
-   After calling this function, be sure to initialize the page
+d_block_till(int64_t wakeup_at);
+void thread_priority_temporarily_up(struct thread * t);
+void thread_set_next_wakeup(void);
+void thread_priority_restore(struct thread * t);
+eeeeeeeeeeeeeeeeeehis function, be sure to initialize the page
    allocator before trying to create any threads with
    thread_create().
 
@@ -126,6 +147,7 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+  //initial_thread->waitTime = 0;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -161,12 +183,13 @@ thread_tick (void)
 #endif
   else
     kernel_ticks++;
-
+	
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
-	
+
 	thread_set_next_wakeup();
+
 }
 
 /* Prints thread statistics. */
@@ -239,6 +262,13 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+
+	
+    old_level = intr_disable();
+  test_yield();
+intr_set_level(old_level);
+
+
   return tid;
 }
 
@@ -266,6 +296,16 @@ thread_block (void)
    be important: if the caller had disabled interrupts itself,
    it may expect that it can atomically unblock a thread and
    update other data. */
+
+
+/*bool
+ticks_comparator(struct list_elem *a,struct list_elem *b,void *aux UNUSED)
+{
+	struct thread *t1=list_entry(a,struct thread,elem);
+	struct thread *t2=list_entry(b,struct thread,elem);
+	return (t1->ticks > t2->ticks);
+}*/
+
 void
 thread_unblock (struct thread *t) 
 {
@@ -275,7 +315,8 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_insert_ordered (&ready_list, &t->elem, (list_less_func*)&compar, NULL);
+  list_insert_ordered (&ready_list, &t->elem,compar, NULL);
+  
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -346,11 +387,42 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_insert_ordered (&ready_list, &cur->elem, (list_less_func*)&compar, NULL);
+    {
+	list_insert_ordered (&ready_list, &cur->elem, compar, NULL);
+	
+	}
+  
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
 }
+
+
+/*void recompute_thread_priority (struct thread* t) {
+   t->priority = 0;
+  if(!list_empty(&t->donorList)){
+    struct thread *donor = list_entry(list_max(&t->donorList, thread_donor_priority, NULL), struct thread, donationElem);
+   
+    if (donor->priority > t->priority){
+      t->priority = donor->priority;
+    }
+    else
+    {
+      if(t->prev_priority > t->priority)
+	t->priority = t->prev_priority;
+    }
+  }
+  else
+  {
+    t->priority = t->prev_priority;
+  }
+
+  if (t->donee != NULL)
+  {
+    recompute_thread_priority(t->donee);
+  }
+}*/
+
 
 /* Invoke function 'func' on all threads, passing along 'aux'.
    This function must be called with interrupts off. */
@@ -382,8 +454,16 @@ thread_set_priority (int new_priority)
   
   /* give the current thread priority to init_priority used to update_priority() */
   thread_current() -> prev_priority = new_priority;
- 
-    
+  
+  /* update current thread priority */
+  update_priority();
+  
+  /*
+   * If the current thread priority is higher than the previous thread priority,
+   * it need to donate their priority.
+   */
+  if (old_priority < thread_current() -> priority)
+    donate_priority();
     
   /*
    * If the current thread priority is lower than the previous thread priority,
@@ -393,16 +473,16 @@ thread_set_priority (int new_priority)
     test_yield();
   
   
-	intr_set_level(old_level);
+intr_set_level(old_level);
 }
 
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) 
 {
-	enum intr_level old_level;
+  enum intr_level old_level;
   old_level = intr_disable();
-  intr_set_level(old_level);
+intr_set_level(old_level);
   return thread_current ()->priority;
 }
 
@@ -515,14 +595,17 @@ init_thread (struct thread *t, const char *name, int priority)
   ASSERT (t != NULL);
   ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
   ASSERT (name != NULL);
-
+	
   memset (t, 0, sizeof *t);
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
+  t->prev_priority = priority;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
+  t -> wants_lock = NULL;
+  list_init(&(t->donor_list));
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
@@ -640,34 +723,35 @@ allocate_tid (void)
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
 
 
+
 //TIMER_SLEEP  functions
 
 
 void  thread_priority_temporarily_up(struct thread * t)
 {
 
-        t->prev_priority = t->priority;
-        t->priority = PRI_MAX;
-
+	t->prev_priority = t->priority;
+	t->priority = PRI_MAX;
+	
 
 }
 
 void thread_block_till(int64_t wakeup_at)
 {
   struct thread *t = thread_current();
-
+	
    if(wakeup_at<=0)
-        return;
-
+	return;
+  
   ASSERT(t->status==THREAD_RUNNING);
 
- enum intr_level old_level = intr_disable();
+  enum intr_level old_level = intr_disable();
   thread_priority_temporarily_up(t);
- t->wakeup_at = wakeup_at+timer_ticks();
-  list_insert_ordered(&sleeper_list,&t->elem, (list_less_func*)before, NULL);
-
-        thread_block();
-        intr_set_level(old_level);
+  t->wakeup_at = wakeup_at + timer_ticks();
+  list_insert_ordered(&sleeper_list, &t->elem, before, NULL);
+	
+	thread_block();
+	intr_set_level(old_level);
 }
 
 void thread_set_next_wakeup()
@@ -678,8 +762,7 @@ struct list_elem *cur_elem;
   enum intr_level old_level;
   if(list_empty(&sleeper_list))return;
   cur_elem=list_begin(&sleeper_list);
-
-while(!list_empty(&sleeper_list))
+  while(!list_empty(&sleeper_list))
   {
     next_elem=list_next(cur_elem);
     t=list_entry(cur_elem,struct thread, elem);
@@ -692,16 +775,23 @@ while(!list_empty(&sleeper_list))
     intr_set_level(old_level);
     cur_elem=next_elem;
   }
-
-
+  
+   
 }
 void thread_priority_restore(struct thread * t)
-	{
-
-
+{
+  
+ 
   t->priority = t->prev_priority;
-
+  
 }
+
+
+
+
+//priority scheduling
+
+
 void test_yield(void)
 {
   struct thread *t;
@@ -714,4 +804,77 @@ void test_yield(void)
   if ((thread_current() -> priority) < t -> priority)
     thread_yield();
 }
+
+/* Update the thread priority */
+void update_priority (void) 
+{
+  struct thread *ct; /* current thread */
+  struct thread *nt; /* new thread */
+  
+  ct = thread_current(); /* get current thread priotity */
+  ct -> priority = ct -> prev_priority; /* put the current thread priority to init_priority */
+  
+  if (list_empty(&ct -> donor_list))
+    return;
+  
+  nt = list_entry(list_front(&ct -> donor_list), struct thread, donor_list_elem);
+
+if ((nt -> priority) > (ct -> priority))
+    ct -> priority = nt -> priority;
+}
+
+/* Donate the priority (priority inheritance) */
+void donate_priority(void) 
+{
+  int depth = 0;
+  struct thread *t;
+  struct lock *l;
+
+  t = thread_current(); /* get current thread priority */
+  l = t -> wants_lock; /* put current thread on lock */
+
+  
+
+  /* when lock is exist */
+
+  while (l && depth < DEPTH_LIMIT) {
+    ++depth;
+
+    /* no thread hold lock */
+    if (l -> holder == NULL) {
+      return;
+    }
+
+ if ((l -> holder -> priority) >= t -> priority) {
+      return;
+    }
+    
+    /*
+     * get current thread priority from the thread hold lock.
+     * the current thread priority is higher than the thread hold lock.
+     */
+    l -> holder -> priority = t -> priority;
+
+    /* put thread on lock */
+		t = l->holder;
+    l = t -> wants_lock;
+  }
+}
+
+void lock_remove (struct lock *lock) 
+{
+  struct list_elem *e;
+  struct thread *t;
+  for (
+    e = list_begin(&thread_current() -> donor_list);
+    e != list_end(&thread_current() -> donor_list);
+    e = list_next(e)
+  ) {
+    t = list_entry(e, struct thread, donor_list_elem);
+    
+    if (t -> wants_lock == lock)
+      list_remove(e);
+  }
+}
+
 
